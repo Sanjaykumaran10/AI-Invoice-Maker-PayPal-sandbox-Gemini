@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Invoice Maker</title>
+<style>
+  :root { --bg:#eef2f5; --card:#fff; --ink:#14202b; --muted:#5b6b79; --line:#d3dce4; --accent:#0b5fff; --accent-ink:#fff; --err:#b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1720; --card:#17222e; --ink:#e8eef4; --muted:#93a4b3; --line:#2a3947; --accent:#5b9bff; --accent-ink:#06121f; --err:#ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 Georgia, "Times New Roman", serif; }
+  main { max-width: 40rem; margin: 0 auto; padding: 2.5rem 1rem 4rem; }
+  h1 { font-size: 1.8rem; margin: 0 0 .25rem; }
+  p.sub { color: var(--muted); margin: 0 0 1.5rem; font-family: system-ui, sans-serif; font-size: .95rem; }
+  textarea { width:100%; min-height:7rem; padding:.8rem; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); font:inherit; resize:vertical; }
+  button { margin-top:.75rem; padding:.65rem 1.1rem; border:0; border-radius:6px; background:var(--accent); color:var(--accent-ink); font:600 .95rem system-ui, sans-serif; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:wait; }
+  button:focus-visible, textarea:focus-visible, a:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  #err { color:var(--err); font-family:system-ui,sans-serif; margin-top:.75rem; min-height:1.2em; }
+  #invoice { display:none; margin-top:2rem; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:1.5rem; }
+  #invoice header { display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; border-bottom:2px solid var(--ink); padding-bottom:.75rem; margin-bottom:1rem; }
+  table { width:100%; border-collapse:collapse; font-family:system-ui,sans-serif; font-size:.95rem; }
+  th, td { text-align:left; padding:.45rem 0; border-bottom:1px solid var(--line); }
+  th:not(:first-child), td:not(:first-child) { text-align:right; }
+  .total { display:flex; justify-content:space-between; font-size:1.3rem; font-weight:700; margin-top:1rem; }
+  .notes { color:var(--muted); font-style:italic; margin-top:.75rem; }
+  #payLink { display:none; margin-top:1rem; font-family:system-ui,sans-serif; word-break:break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AI Invoice Maker</h1>
+  <p class="sub">Describe the work in your own words. Get an invoice and a PayPal payment link.</p>
+
+  <textarea id="notes" placeholder="Designed a logo for Ravi, 3 hours at $40, plus $20 for hosting"></textarea>
+  <button id="parseBtn">Create invoice</button>
+  <div id="err" role="alert"></div>
+
+  <section id="invoice" aria-live="polite">
+    <header><strong id="inv-client"></strong><span id="inv-no"></span></header>
+    <table>
+      <thead><tr><th>Description</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="total"><span>Total</span><span id="inv-total"></span></div>
+    <div class="notes" id="inv-notes"></div>
+    <button id="payBtn">Create payment link</button>
+    <div id="payLink"></div>
+  </section>
+</main>
+
+<script>
+  let invoice = null;
+  const $ = (id) => document.getElementById(id);
+
+  async function post(url, body) {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Something went wrong.");
+    return data;
+  }
+
+  function cell(tr, text) { const td = document.createElement("td"); td.textContent = text; tr.appendChild(td); }
+
+  $("parseBtn").onclick = async () => {
+    $("err").textContent = ""; $("payLink").style.display = "none";
+    $("parseBtn").disabled = true; $("parseBtn").textContent = "Reading your notes...";
+    try {
+      invoice = await post("/api/parse", { text: $("notes").value });
+      $("inv-client").textContent = "Invoice for " + invoice.client_name;
+      $("inv-no").textContent = new Date().toLocaleDateString();
+      $("rows").replaceChildren();
+      invoice.items.forEach((it) => {
+        const tr = document.createElement("tr");
+        cell(tr, it.description); cell(tr, it.quantity); cell(tr, it.unit_price); cell(tr, it.line_total);
+        $("rows").appendChild(tr);
+      });
+      $("inv-total").textContent = invoice.total + " " + invoice.currency;
+      $("inv-notes").textContent = invoice.notes;
+      $("invoice").style.display = "block";
+    } catch (e) { $("err").textContent = e.message; }
+    $("parseBtn").disabled = false; $("parseBtn").textContent = "Create invoice";
+  };
+
+  $("payBtn").onclick = async () => {
+    $("err").textContent = ""; $("payBtn").disabled = true;
+    try {
+      const r = await post("/api/create-order", invoice);
+      const a = document.createElement("a");
+      a.href = r.pay_url; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Pay " + r.invoice_no + " on PayPal";
+      $("payLink").replaceChildren(a); $("payLink").style.display = "block";
+    } catch (e) { $("err").textContent = e.message; }
+    $("payBtn").disabled = false;
+  };
+</script>
+</body>
+</html>
